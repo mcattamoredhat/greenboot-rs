@@ -134,7 +134,7 @@
 
         - assert:
             that:
-              - "'Finished systemd-update-done.service - Update is Completed' in result_systemd_update_log.stdout"
+              - "'Finished Update is Completed' in result_systemd_update_log.stdout"
               - "'Rollback trigger set successfully' in result_greenboot_trigger_log.stdout"
               - "'Dependency failed' not in result_greenboot_trigger_log.stdout"
             fail_msg: "Expected greenboot trigger log or systemd update log not found, or dependency failure found"
@@ -163,7 +163,7 @@
 
         - assert:
             that:
-              - "'Finished systemd-update-done.service - Update is Completed' in result_systemd_update_log.stdout"
+              - "'Finished Update is Completed' in result_systemd_update_log.stdout"
               - "'Rollback trigger set successfully' in result_greenboot_trigger_log.stdout"
               - "'Dependency failed' not in result_greenboot_trigger_log.stdout"
             fail_msg: "Expected greenboot trigger log or systemd update log not found, or dependency failure found"

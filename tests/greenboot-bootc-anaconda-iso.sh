@@ -53,6 +53,20 @@ case "${ID}-${VERSION_ID}" in
         BOOT_ARGS="uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no"
         sudo dnf install -y make rpm-build rust-toolset
         ;;
+    "centos-9")
+        OS_VARIANT="centos-stream9"
+        BASE_IMAGE_URL="quay.io/centos-bootc/centos-bootc:stream9"
+        BIB_URL="quay.io/centos-bootc/bootc-image-builder:latest"
+        BOOT_ARGS="uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no"
+        sudo dnf install -y make rpm-build rust-toolset
+        ;;
+    "rhel-9.8")
+        OS_VARIANT="rhel9-unknown"
+        BASE_IMAGE_URL="registry.stage.redhat.io/rhel9/rhel-bootc:9.8"
+        BIB_URL="quay.io/centos-bootc/bootc-image-builder:latest"
+        BOOT_ARGS="uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no"
+        sudo dnf install -y make rpm-build rust-toolset
+        ;;
     *)
         echo "unsupported distro: ${ID}-${VERSION_ID}"
         exit 1;;
@@ -170,8 +184,23 @@ cp testing_assets/failing_binary tests/ && popd
 ###########################################################
 greenprint "Building bootc container with greenboot installed"
 podman login quay.io -u ${QUAY_USERNAME} -p ${QUAY_PASSWORD}
-tee Containerfile > /dev/null << EOF
+# Initialize Containerfile
+rm -f Containerfile
+
+# For RHEL, configure repositories before installing packages
+if [[ "${ID}-${VERSION_ID}" == "rhel-9.8" ]]; then
+    cat > Containerfile << REPOEOF
 FROM ${BASE_IMAGE_URL}
+# Configure repositories for RHEL 9.8
+# Check if repositories are already configured, if not, add them
+RUN printf '[baseos]\nname=Red Hat Enterprise Linux 9 - BaseOS\nbaseurl=http://${DOWNLOAD_NODE}/rhel-9/nightly/RHEL-9/latest-RHEL-9.8.0/compose/BaseOS/x86_64/os/\nenabled=1\ngpgcheck=0\nsslverify=0\n\n[appstream]\nname=Red Hat Enterprise Linux 9 - AppStream\nbaseurl=http://${DOWNLOAD_NODE}/rhel-9/nightly/RHEL-9/latest-RHEL-9.8.0/compose/AppStream/x86_64/os/\nenabled=1\ngpgcheck=0\nsslverify=0\n' > /etc/yum.repos.d/rhel9.repo
+REPOEOF
+else
+    # For non-RHEL distros, just start with FROM
+    echo "FROM ${BASE_IMAGE_URL}" > Containerfile
+fi
+
+cat >> Containerfile << EOF
 # Copy the local RPM files into the container
 COPY greenboot-*.rpm /tmp/
 RUN dnf install -y \
