@@ -134,7 +134,7 @@
 
         - assert:
             that:
-              - "'Finished systemd-update-done.service - Update is Completed' in result_systemd_update_log.stdout"
+              - ("'Finished systemd-update-done.service - Update is Completed' in result_systemd_update_log.stdout") or ("'Finished Update is Completed' in result_systemd_update_log.stdout")
               - "'Rollback trigger set successfully' in result_greenboot_trigger_log.stdout"
               - "'Dependency failed' not in result_greenboot_trigger_log.stdout"
             fail_msg: "Expected greenboot trigger log or systemd update log not found, or dependency failure found"
@@ -163,7 +163,7 @@
 
         - assert:
             that:
-              - "'Finished systemd-update-done.service - Update is Completed' in result_systemd_update_log.stdout"
+              - ("'Finished systemd-update-done.service - Update is Completed' in result_systemd_update_log.stdout") or ("'Finished Update is Completed' in result_systemd_update_log.stdout")
               - "'Rollback trigger set successfully' in result_greenboot_trigger_log.stdout"
               - "'Dependency failed' not in result_greenboot_trigger_log.stdout"
             fail_msg: "Expected greenboot trigger log or systemd update log not found, or dependency failure found"
@@ -395,10 +395,18 @@
           register: result_restart
           become: yes
           ignore_errors: yes
-
+          ignore_unreachable: yes
+    
+        - name: Wait for VM SSH to become reachable again (if restart triggered a reboot)
+          wait_for_connection:
+            delay: 5
+            timeout: 300
+    
+        - meta: clear_host_errors
+    
         - assert:
             that:
-              - "'Failed to restart greenboot-healthcheck.service: Operation refused' in result_restart.stderr" 
+              - "'Failed to restart greenboot-healthcheck.service: Operation refused' in result_restart.stderr"
             fail_msg: "Expected error message for manual restart refusal was not found"
             success_msg: "Service correctly refuses manual restart (expected behavior)"
       always:

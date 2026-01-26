@@ -31,6 +31,15 @@ SSH_KEY_PUB=$(cat "${SSH_KEY}".pub)
 EDGE_USER=core
 EDGE_USER_PASSWORD=foobar
 
+# Download node for compose content (required for RHEL 9/10 RPM fetches)
+if [[ -z "${DOWNLOAD_NODE:-}" ]]; then
+    echo "ERROR: DOWNLOAD_NODE is not set (required to download greenboot RPMs from compose)" >&2
+    exit 1
+fi
+
+# Compose RPM directory (set per-distro below). We always download RPMs; no local builds.
+GREENBOOT_PACKAGES_URL=""
+
 case "${ID}-${VERSION_ID}" in
     "fedora-43")
         OS_VARIANT="fedora-unknown"
@@ -46,12 +55,39 @@ case "${ID}-${VERSION_ID}" in
         BOOT_ARGS="uefi"
         sudo dnf install -y rpmbuild rust-packaging
         ;;
-    "centos-10")
+    rhel-9*)
         OS_VARIANT="centos-stream9"
+        BASE_IMAGE_URL="registry.stage.redhat.io/rhel9/rhel-bootc:9.8"
+        BIB_URL="quay.io/centos-bootc/bootc-image-builder:latest"
+        BOOT_ARGS="uefi"
+        sudo dnf install -y make rpm-build rust-toolset
+        GREENBOOT_PACKAGES_URL="https://${DOWNLOAD_NODE}/rhel-9/nightly/RHEL-9/latest-RHEL-9.8.0/compose/AppStream/x86_64/os/Packages/"
+        ;;
+    "centos-9")
+        OS_VARIANT="centos-stream9"
+        BASE_IMAGE_URL="quay.io/centos-bootc/centos-bootc:stream9"
+        BIB_URL="quay.io/centos-bootc/bootc-image-builder:latest"
+        BOOT_ARGS="uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no"
+        sudo dnf install -y make rpm-build rust-toolset
+        GREENBOOT_PACKAGES_URL="https://mirror.stream.centos.org/9-stream/AppStream/x86_64/os/Packages/"
+        ;;
+    "centos-10")
+        OS_VARIANT="centos-stream10"
         BASE_IMAGE_URL="quay.io/centos-bootc/centos-bootc:stream10"
         BIB_URL="quay.io/centos-bootc/bootc-image-builder:latest"
         BOOT_ARGS="uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no"
         sudo dnf install -y make rpm-build rust-toolset
+        GREENBOOT_PACKAGES_URL="https://mirror.stream.centos.org/10-stream/AppStream/x86_64/os/Packages/"
+        ;;
+    rhel-10*)
+        OS_VARIANT="rhel10-unknown"
+        BASE_IMAGE_URL="registry.stage.redhat.io/rhel10/rhel-bootc:10.2"
+        BIB_URL="quay.io/centos-bootc/bootc-image-builder:latest"
+        BOOT_ARGS="uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no"
+        sudo dnf install -y make rpm-build rust-toolset
+        #GREENBOOT_PACKAGES_URL="https://${DOWNLOAD_NODE}/rhel-10/nightly/RHEL-10/latest-RHEL-10.2/compose/AppStream/x86_64/os/Packages/"
+        GREENBOOT_PACKAGES_URL="http://download.devel.redhat.com/rhel-10/composes/RHEL-10/RHEL-10.2-20260226.1/compose/AppStream/x86_64/os/Packages/"
+        # GREENBOOT_PACKAGES_URL="https://cts.engineering.redhat.com/api/1/composes/RHEL-10.2-20260226.1"
         ;;
     *)
         echo "unsupported distro: ${ID}-${VERSION_ID}"
@@ -151,17 +187,27 @@ fi
 
 ###########################################################
 ##
-## Build greenboot rpm packages
+## Get greenboot rpm packages
 ##
 ###########################################################
-greenprint "Building greenboot packages"
-pushd .. && \
-make rpm
-cp rpmbuild/RPMS/x86_64/*.rpm tests/
-cp testing_assets/passing_script.sh tests/
-cp testing_assets/passing_binary tests/
-cp testing_assets/failing_script.sh tests/
-cp testing_assets/failing_binary tests/ && popd
+greenprint "Getting greenboot packages"
+greenprint "Downloading greenboot RPMs from: ${GREENBOOT_PACKAGES_URL}"
+rm -f greenboot-*.rpm
+
+# Pick the newest RPMs from the Packages/ index page.
+GREENBOOT_RPM="$(curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "${GREENBOOT_PACKAGES_URL}" | grep -oE 'greenboot-[0-9][^"]*\.rpm' | grep -vE 'debug(info|source)' | sort -V | tail -n 1)"
+GREENBOOT_DEFAULT_RPM="$(curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "${GREENBOOT_PACKAGES_URL}" | grep -oE 'greenboot-default-health-checks-[0-9][^"]*\.rpm' | sort -V | tail -n 1)"
+
+curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+    "${GREENBOOT_PACKAGES_URL}${GREENBOOT_RPM}" -o "${GREENBOOT_RPM}"
+curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+    "${GREENBOOT_PACKAGES_URL}${GREENBOOT_DEFAULT_RPM}" -o "${GREENBOOT_DEFAULT_RPM}"
+
+# Stage test assets into the build context (does not modify testing_assets/).
+cp ../testing_assets/passing_script.sh .
+cp ../testing_assets/passing_binary .
+cp ../testing_assets/failing_script.sh .
+cp ../testing_assets/failing_binary .
 
 ###########################################################
 ##

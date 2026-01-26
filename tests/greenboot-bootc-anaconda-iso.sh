@@ -31,6 +31,17 @@ SSH_KEY_PUB=$(cat "${SSH_KEY}".pub)
 EDGE_USER=core
 EDGE_USER_PASSWORD=foobar
 
+# Download node for compose content (required for RHEL 9/10 RPM fetches)
+if [[ -z "${DOWNLOAD_NODE:-}" ]]; then
+    echo "ERROR: DOWNLOAD_NODE is not set (required to download greenboot RPMs from compose)" >&2
+    exit 1
+fi
+
+# Compose RPM directory (set per-distro below). We always download RPMs; no local builds.
+GREENBOOT_PACKAGES_URL=""
+# Compose root (set per-distro below) used to provide BaseOS/AppStream repos to BIB for anaconda-iso.
+COMPOSE_ROOT_URL=""
+
 case "${ID}-${VERSION_ID}" in
     "fedora-43")
         OS_VARIANT="fedora-unknown"
@@ -46,13 +57,43 @@ case "${ID}-${VERSION_ID}" in
         BOOT_ARGS="uefi"
         sudo dnf install -y rpmbuild rust-packaging
         ;;
-    "centos-10")
+    "rhel-9.8")
         OS_VARIANT="centos-stream9"
+        BASE_IMAGE_URL="registry.stage.redhat.io/rhel9/rhel-bootc:9.8"
+        BIB_URL="quay.io/centos-bootc/bootc-image-builder:latest"
+        BOOT_ARGS="uefi"
+        sudo dnf install -y make rpm-build rust-toolset
+        GREENBOOT_PACKAGES_URL="https://${DOWNLOAD_NODE}/rhel-9/nightly/RHEL-9/latest-RHEL-9.8.0/compose/AppStream/x86_64/os/Packages/"
+        COMPOSE_ROOT_URL="https://${DOWNLOAD_NODE}/rhel-9/nightly/RHEL-9/latest-RHEL-9.8.0/compose"
+        ;;
+    "centos-9")
+        OS_VARIANT="centos-stream9"
+        BASE_IMAGE_URL="quay.io/centos-bootc/centos-bootc:stream9"
+        BIB_URL="quay.io/centos-bootc/bootc-image-builder:latest"
+        BOOT_ARGS="uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no"
+        sudo dnf install -y make rpm-build rust-toolset
+        GREENBOOT_PACKAGES_URL="https://mirror.stream.centos.org/9-stream/AppStream/x86_64/os/Packages/"
+        COMPOSE_ROOT_URL="https://mirror.stream.centos.org/9-stream/"
+        ;;
+    "centos-10")
+        OS_VARIANT="centos-stream10"
         BASE_IMAGE_URL="quay.io/centos-bootc/centos-bootc:stream10"
         BIB_URL="quay.io/centos-bootc/bootc-image-builder:latest"
         BOOT_ARGS="uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no"
         sudo dnf install -y make rpm-build rust-toolset
+        GREENBOOT_PACKAGES_URL="https://mirror.stream.centos.org/10-stream/AppStream/x86_64/os/Packages/"
+        COMPOSE_ROOT_URL="https://mirror.stream.centos.org/10-stream/"
         ;;
+    "rhel-10.2")
+        OS_VARIANT="rhel10-unknown"
+        BASE_IMAGE_URL="registry.stage.redhat.io/rhel10/rhel-bootc:10.2"
+        BIB_URL="quay.io/centos-bootc/bootc-image-builder:latest"
+        BOOT_ARGS="uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no"
+        sudo dnf install -y make rpm-build rust-toolset
+        GREENBOOT_PACKAGES_URL="https://${DOWNLOAD_NODE}/rhel-10/nightly/RHEL-10/latest-RHEL-10.2/compose/AppStream/x86_64/os/Packages/"
+        COMPOSE_ROOT_URL="https://${DOWNLOAD_NODE}/rhel-10/nightly/RHEL-10/latest-RHEL-10.2/compose"
+        ;;
+
     *)
         echo "unsupported distro: ${ID}-${VERSION_ID}"
         exit 1;;
@@ -154,24 +195,56 @@ fi
 ## Build greenboot rpm packages
 ##
 ###########################################################
-greenprint "Building greenboot packages"
-pushd .. && \
-make rpm
-cp rpmbuild/RPMS/x86_64/*.rpm tests/
-cp testing_assets/passing_script.sh tests/
-cp testing_assets/passing_binary tests/
-cp testing_assets/failing_script.sh tests/
-cp testing_assets/failing_binary tests/ && popd
+greenprint "Getting greenboot packages"
+greenprint "Downloading greenboot RPMs from: ${GREENBOOT_PACKAGES_URL}"
+rm -f greenboot-*.rpm
+
+# Pick the newest RPMs from the Packages/ index page.
+GREENBOOT_RPM="$(curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "${GREENBOOT_PACKAGES_URL}" | grep -oE 'greenboot-[0-9][^"]*\.rpm' | grep -vE 'debug(info|source)' | sort -V | tail -n 1)"
+GREENBOOT_DEFAULT_RPM="$(curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "${GREENBOOT_PACKAGES_URL}" | grep -oE 'greenboot-default-health-checks-[0-9][^"]*\.rpm' | sort -V | tail -n 1)"
+
+curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+    "${GREENBOOT_PACKAGES_URL}${GREENBOOT_RPM}" -o "${GREENBOOT_RPM}"
+curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+    "${GREENBOOT_PACKAGES_URL}${GREENBOOT_DEFAULT_RPM}" -o "${GREENBOOT_DEFAULT_RPM}"
+
+# Stage test assets into the build context (does not modify testing_assets/).
+cp ../testing_assets/passing_script.sh .
+cp ../testing_assets/passing_binary .
+cp ../testing_assets/failing_script.sh .
+cp ../testing_assets/failing_binary .
 
 ###########################################################
 ##
 ## Build bootc container with greenboot installed
 ##
 ###########################################################
+
+# anaconda-iso needs enabled repos for depsolve (lorax/anaconda bits). Provide them via a repo file.
+tee compose.repo > /dev/null << EOF
+[compose-baseos]
+name=compose-baseos
+baseurl=${COMPOSE_ROOT_URL}/BaseOS/x86_64/os/
+enabled=1
+gpgcheck=0
+# Disable SSL verification for the local repo file.
+sslverify=0
+
+[compose-appstream]
+name=compose-appstream
+baseurl=${COMPOSE_ROOT_URL}/AppStream/x86_64/os/
+enabled=1
+gpgcheck=0
+# Disable SSL verification for the local repo file.
+sslverify=0
+EOF
+
 greenprint "Building bootc container with greenboot installed"
 podman login quay.io -u ${QUAY_USERNAME} -p ${QUAY_PASSWORD}
 tee Containerfile > /dev/null << EOF
 FROM ${BASE_IMAGE_URL}
+# Provide enabled repos for depsolve (lorax/anaconda bits).
+COPY compose.repo /etc/yum.repos.d/compose.repo
 # Copy the local RPM files into the container
 COPY greenboot-*.rpm /tmp/
 RUN dnf install -y \
@@ -224,6 +297,8 @@ tee config.json > /dev/null << EOF
 }
 EOF
 sudo rm -fr output && mkdir -p output
+
+
 podman run \
     --rm \
     -it \
@@ -280,10 +355,11 @@ rm -rf "$ISOMOUNT"
 ###########################################################
 greenprint "Installing vm with bootc anaconda iso image"
 greenprint "💾 Create vm qcow2 files for ISO installation"
+VM_NAME="${TEST_UUID}-uefi"
 LIBVIRT_IMAGE_PATH_UEFI=/var/lib/libvirt/images/${TEST_UUID}-disk.qcow2
 sudo qemu-img create -f qcow2 "/var/lib/libvirt/images/${TEST_UUID}-disk.qcow2" 10G
 sudo restorecon -Rv /var/lib/libvirt/images/
-sudo virt-install  --name="${TEST_UUID}-uefi"\
+sudo virt-install  --name="${VM_NAME}"\
                    --disk path="${LIBVIRT_IMAGE_PATH_UEFI}",format=qcow2 \
                    --ram 3072 \
                    --vcpus 2 \
@@ -297,7 +373,7 @@ sudo virt-install  --name="${TEST_UUID}-uefi"\
                    --wait=-1 \
                    --noreboot
 greenprint "Starting UEFI VM"
-sudo virsh start "${TEST_UUID}-uefi"
+sudo virsh start "${VM_NAME}"
 
 # Check for ssh ready to go.
 greenprint "🛃 Checking for SSH is ready to go"
