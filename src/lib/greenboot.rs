@@ -158,6 +158,14 @@ fn run_scripts(name: &str, path: &str, disabled_scripts: Option<&[String]>) -> S
         match output {
             Ok(o) if o.status.success() => {
                 log::info!("{} script {} success!", name, entry.to_string_lossy());
+                let stdout = String::from_utf8_lossy(&o.stdout);
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                if !stdout.trim().is_empty() {
+                    log::info!("{}", stdout.trim_end());
+                }
+                if !stderr.trim().is_empty() {
+                    log::warn!("{}", stderr.trim_end());
+                }
             }
             Ok(o) => {
                 let error_msg = format!(
