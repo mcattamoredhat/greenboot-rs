@@ -645,8 +645,8 @@ greenprint "🛃 Copying binary and script files to edge vm"
 ssh "${SSH_OPTIONS[@]}" -i "${SSH_KEY}" "${SSH_USER}@${GUEST_ADDRESS}" "sudo mkdir -p /etc/greenboot/red.d /etc/greenboot/green.d"
 
 # Copy all files to temp directory first (all at once)
-scp "${SSH_OPTIONS[@]}" -i "${SSH_KEY}" ../testing_assets/failing_binary "${SSH_USER}@${GUEST_ADDRESS}":/tmp/ && \
-scp "${SSH_OPTIONS[@]}" -i "${SSH_KEY}" ../testing_assets/passing_binary "${SSH_USER}@${GUEST_ADDRESS}":/tmp/ && \
+scp "${SSH_OPTIONS[@]}" -i "${SSH_KEY}" "../testing_assets/failing_binary.${ARCH}" "${SSH_USER}@${GUEST_ADDRESS}":/tmp/failing_binary && \
+scp "${SSH_OPTIONS[@]}" -i "${SSH_KEY}" "../testing_assets/passing_binary.${ARCH}" "${SSH_USER}@${GUEST_ADDRESS}":/tmp/passing_binary && \
 scp "${SSH_OPTIONS[@]}" -i "${SSH_KEY}" ../testing_assets/failing_script.sh "${SSH_USER}@${GUEST_ADDRESS}":/tmp/ && \
 scp "${SSH_OPTIONS[@]}" -i "${SSH_KEY}" ../testing_assets/passing_script.sh "${SSH_USER}@${GUEST_ADDRESS}":/tmp/
 

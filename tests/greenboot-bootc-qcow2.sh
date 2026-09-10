@@ -255,9 +255,9 @@ greenprint "Copying test assets"
 (
     cd ..
     cp testing_assets/passing_script.sh tests/
-    cp testing_assets/passing_binary tests/
+    cp "testing_assets/passing_binary.${ARCH}" tests/passing_binary
     cp testing_assets/failing_script.sh tests/
-    cp testing_assets/failing_binary tests/
+    cp "testing_assets/failing_binary.${ARCH}" tests/failing_binary
 )
 
 ###########################################################
