@@ -261,10 +261,18 @@ else
 fi
 
 greenprint "Looking up exact greenboot NEVR to pin from ${GREENBOOT_NEVR_LOOKUP_URL}"
-GREENBOOT_NEVR=$(sudo dnf repoquery \
-    --repofrompath="greenboot-nevr-lookup,${GREENBOOT_NEVR_LOOKUP_URL}" \
-    --disablerepo='*' --enablerepo=greenboot-nevr-lookup \
-    --quiet --qf '%{version}-%{release}' --latest-limit=1 greenboot)
+GREENBOOT_NEVR=""
+for _ in $(seq 0 30); do
+    GREENBOOT_NEVR=$(sudo dnf repoquery \
+        --repofrompath="greenboot-nevr-lookup,${GREENBOOT_NEVR_LOOKUP_URL}" \
+        --disablerepo='*' --enablerepo=greenboot-nevr-lookup \
+        --quiet --qf '%{version}-%{release}' --latest-limit=1 greenboot || true)
+    if [ -n "$GREENBOOT_NEVR" ]; then
+        break
+    fi
+    greenprint "Copr metadata not ready yet, retrying NEVR lookup in 30s..."
+    sleep 30
+done
 
 if [ -z "$GREENBOOT_NEVR" ]; then
     echo "Failed to resolve greenboot version-release from repo ${GREENBOOT_NEVR_LOOKUP_URL}"
